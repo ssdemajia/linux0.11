@@ -21,9 +21,14 @@
 
 #define get_seg_byte(seg,addr) ({ \
 register char __res; \
-__asm__("push %%fs;mov %%ax,%%fs;movb %%fs:%2,%%al;pop %%fs" \
-	:"=a" (__res):"0" (seg),"m" (*(addr))); \
+__asm__("push %%fs; \
+		 mov %%ax,%%fs; \
+		 movb %%fs:%2,%%al; \
+		 pop %%fs" \
+		:"=a" (__res)\
+		:"0" (seg),"m" (*(addr))); \
 __res;})
+// "=a"(__res) 表示将%eax的值输出到__res变量中，"0"(seg)表示使用seg作为输入到%eax中
 
 #define get_seg_long(seg,addr) ({ \
 register unsigned long __res; \

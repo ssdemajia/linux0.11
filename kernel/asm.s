@@ -19,7 +19,7 @@
 divide_error:
 	pushl $do_divide_error
 no_error_code:
-	xchgl %eax,(%esp)
+	xchgl %eax,(%esp) # 交换栈指针所指内存的值和%eax的值，%eax=*%esp, *%esp=%eax
 	pushl %ebx
 	pushl %ecx
 	pushl %edx
@@ -36,7 +36,7 @@ no_error_code:
 	mov %dx,%ds
 	mov %dx,%es
 	mov %dx,%fs
-	call *%eax
+	call *%eax  # 取%eax中内容进行调用
 	addl $8,%esp
 	pop %fs
 	pop %es
