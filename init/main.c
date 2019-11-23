@@ -26,6 +26,8 @@ static inline _syscall0(int,fork)
 static inline _syscall0(int,pause)
 static inline _syscall1(int,setup,void *,BIOS)
 static inline _syscall0(int,sync)
+_syscall3(int,mknod,const char *,filename, mode_t,mode, dev_t,dev)
+_syscall2(int,mkdir,const char *,pathname, mode_t,mode)
 
 #include <linux/tty.h>
 #include <linux/sched.h>
@@ -38,6 +40,7 @@ static inline _syscall0(int,sync)
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include <linux/fs.h>
 
@@ -176,6 +179,10 @@ void init(void)
 	(void) open("/dev/tty0",O_RDWR,0);
 	(void) dup(0);
 	(void) dup(0);
+	mkdir("/proc", 0755); // 新建/proc，proc的根目录
+	mknod("/proc/psinfo", S_IFPROC|0444, 1); // 说明这是proc文件，同时只能读
+	mknod("/proc/hdinfo", S_IFPROC|0444, 2);
+	
 	printf("%d buffers = %d bytes buffer space\n\r",NR_BUFFERS,
 		NR_BUFFERS*BLOCK_SIZE);
 	printf("Free mem: %d bytes\n\r",memory_end-main_memory_start);

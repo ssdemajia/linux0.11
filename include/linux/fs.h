@@ -123,7 +123,7 @@ struct file {
 
 struct super_block {
 	unsigned short s_ninodes;
-	unsigned short s_nzones;
+	unsigned short s_nzones; // 逻辑块数
 	unsigned short s_imap_blocks;
 	unsigned short s_zmap_blocks;
 	unsigned short s_firstdatazone;
@@ -131,8 +131,8 @@ struct super_block {
 	unsigned long s_max_size;
 	unsigned short s_magic;
 /* These are only in memory */
-	struct buffer_head * s_imap[8];
-	struct buffer_head * s_zmap[8];
+	struct buffer_head * s_imap[8]; // inode位图的高速缓冲区指针数组
+	struct buffer_head * s_zmap[8]; // 逻辑块位图的高速缓冲区数组
 	unsigned short s_dev;
 	struct m_inode * s_isup;
 	struct m_inode * s_imount;

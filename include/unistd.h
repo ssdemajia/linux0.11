@@ -142,7 +142,7 @@ if (__res >= 0) \
 errno = -__res; \
 return -1; \
 }
-
+// 输入为"=a" (__NR_##name)也就是将系统调用号写入%eax作为输入，然后将输出放入__res中
 #define _syscall1(type,name,atype,a) \
 type name(atype a) \
 { \

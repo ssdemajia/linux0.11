@@ -39,3 +39,14 @@ int printk(const char *fmt, ...)
 		::"r" (i):"ax","cx","dx");
 	return i;
 }
+
+int sprintf(char* buf, const char *fmt, ...) // 一个变参的打印函数
+{
+	va_list args;
+	int i;
+
+	va_start(args, fmt);
+	i=vsprintf(buf,fmt,args);
+	va_end(args);
+	return i;
+}
