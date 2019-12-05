@@ -98,7 +98,7 @@ ok_load_setup:
 	xor	%bh, %bh			# BX包含页码参数
 	int	$0x10
 							# 返回值中DH为行高，DL为列
-	mov	$29, %cx			# CX保存字符串长度
+	mov	$25, %cx			# CX保存字符串长度
 	mov	$0x0007, %bx		# BH为页码，第0页，BL为颜色，page 0, attribute 7 (normal)
 	mov $msg1, %bp			# ES:BP为字符串偏移
 	mov	$0x1301, %ax		# AH=0x13表示写字符串，AL=0x01表示写模式
@@ -239,9 +239,8 @@ sectors:
 	.word 0
 
 msg1:
-	.byte 13,10
 	.ascii "Loading SS's system ..."
-	.byte 13,10,13,10
+	.byte 13,10
 
 	.org 508
 root_dev:

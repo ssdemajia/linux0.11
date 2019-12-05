@@ -32,11 +32,14 @@
 	ljmp $SETUPSEG, $_start	
 _start:
 # 打印现在setup.s中
+	mov %cs, %ax
+	mov %ax, %es
+	mov %ax, %ds
 	mov	$0x03, %ah			# 读取光标位置
 	xor	%bh, %bh			# BX包含页码参数
 	int	$0x10
 							# 返回值中DH为行高，DL为列
-	mov	$31, %cx			# CX保存字符串长度
+	mov	$27, %cx			# CX保存字符串长度
 	mov	$0x0007, %bx		# BH为页码，第0页，BL为颜色，page 0, attribute 7 (normal)
 	mov $msgss, %bp			# ES:BP为字符串偏移
 	mov	$0x1301, %ax		# AH=0x13表示写字符串，AL=0x01表示写模式
@@ -59,12 +62,16 @@ _start:
 	xor	%bh, %bh			# BX包含页码参数
 	int	$0x10
 							# 返回值中DH为行高，DL为列
-	mov	$14, %cx			# CX保存字符串长度
+	mov	$15, %cx			# CX保存字符串长度
 	mov	$0x0007, %bx		# BH为页码，第0页，BL为颜色，page 0, attribute 7 (normal)
 	mov $msgmem, %bp			# ES:BP为字符串偏移
 	mov	$0x1301, %ax		# AH=0x13表示写字符串，AL=0x01表示写模式
 	int	$0x10
-	
+	# 打印十六进制的内存大小
+	mov %ds:2, %bp
+	call print_hex
+	call print_nl
+
 # Get video-card data:
 	mov	$0x0f, %ah  	# 0x0f获取video-card state
 	int	$0x10
@@ -120,7 +127,7 @@ no_disk1:
 	rep
 	stosb
 is_disk1:
-sbb:	jmp sbb
+
 # 接下来进入保护模式
 
 	cli			# no interrupts allowed ! 
@@ -228,6 +235,31 @@ empty_8042:
 	jnz	empty_8042	# yes - loop
 	ret
 
+# 打印16位的16进制格式数字串到屏幕
+print_hex:
+	mov $4, %cx
+	mov (%bp), %dx
+	print_digit:
+		rol $4, %dx
+		mov $0x0e0f, %ax
+		and %dl, %al
+		add $0x30, %al
+		cmp $0x33, %al
+		jl  outp
+		add 0x07, %al
+	outp:
+		int $0x10
+	loop print_digit
+	ret
+
+# 打印换行回车到屏幕
+print_nl:
+	mov $0x0e0a, %ax
+	int $0x10
+	mov $0x0e0d, %ax
+	int $0x10
+	ret
+
 gdt:
 	.word	0,0,0,0		# dummy
 
@@ -250,12 +282,10 @@ gdt_48:
 	.word   512+gdt, 0x9		# gdt base = 0X9xxxx, 
 	# 512+gdt is the real gdt after setup is moved to 0x9020 * 0x10
 msgss:
-	.byte 13,10
 	.ascii "Now we are in setup.s ..."
-	.byte 13,10,13,10
-msgmem:
-	.ascii "Memory size:"
 	.byte 13,10
+msgmem:
+	.ascii "Memory size: 0x"
 .text
 endtext:
 .data
