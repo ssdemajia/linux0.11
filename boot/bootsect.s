@@ -35,7 +35,7 @@
 
 	.equ SETUPLEN, 4		# nr of setup-sectors
 	.equ BOOTSEG, 0x07c0		# original address of boot-sector
-	.equ INITSEG, 0x9000		# we move boot here - out of the way
+	.equ INITSEG, 0x9000		# bootsect.s被移动到0x90000
 	.equ SETUPSEG, 0x9020		# setup starts here
 	.equ SYSSEG, 0x1000		# system loaded at 0x10000 (65536).
 	.equ ENDSEG, SYSSEG + SYSSIZE	# where to stop loading
@@ -54,7 +54,7 @@ _start:
 	sub	%di, %di
 	rep	
 	movsw
-	ljmp	$INITSEG, $go
+	ljmp	$INITSEG, $go # cs中为$INITSEG，eip中为$go
 go:	mov	%cs, %ax
 	mov	%ax, %ds
 	mov	%ax, %es
@@ -66,13 +66,13 @@ go:	mov	%cs, %ax
 # Note that 'es' is already set up.
 
 load_setup:
-	mov	$0x0000, %dx		# drive 0, head 0
-	mov	$0x0002, %cx		# sector 2, track 0
+	mov	$0x0000, %dx		# dh为磁头号，即磁头为0，dl为驱动号，驱动为0
+	mov	$0x0002, %cx		# ch为磁道号低8位，即磁道为0，cl为开始扇区，开始扇区是2
 	mov	$0x0200, %bx		# address = 512, in INITSEG
-	.equ    AX, 0x0200+SETUPLEN
-	mov     $AX, %ax		# service 2, nr of sectors
-	int	$0x13			# read it
-	jnc	ok_load_setup		# ok - continue
+	.equ    AX, 0x0200+SETUPLEN  # AH为0x02表示读磁盘扇区到内存，AL为0x04表示读取4个扇区
+	mov     $AX, %ax		# es:bx指向数据缓冲区，如果出错那么CF标志置位
+	int	$0x13				# read it
+	jnc	ok_load_setup		# ok - continue，如果carry flag没有置位跳转到ok_load_setup
 	mov	$0x0000, %dx
 	mov	$0x0000, %ax		# reset the diskette
 	int	$0x13
@@ -80,51 +80,50 @@ load_setup:
 
 ok_load_setup:
 
-# Get disk drive parameters, specifically nr of sectors/track
+# 获取磁盘参数，特别是每个磁道的扇区数
 
-	mov	$0x00, %dl
-	mov	$0x0800, %ax		# AH=8 is get drive parameters
+	mov	$0x00, %dl			# DL为驱动器号0
+	mov	$0x0800, %ax		# AH为0表示获取磁盘参数
 	int	$0x13
-	mov	$0x00, %ch
+	mov	$0x00, %ch			# BL包含驱动器类型,CH最大磁道号的低8位，CL包含每磁道最大扇区数，DH最大磁头数，DL驱动器数量，
+							# ES:DI磁盘参数表，出错则CF置位，ah为状态码
 	#seg cs
-	mov	%cx, %cs:sectors+0	# %cs means sectors is in %cs
-	mov	$INITSEG, %ax
+	mov	%cx, %cs:sectors+0	# 保存磁道扇区数到sectors变量中
+	mov	$INITSEG, %ax		# 恢复ES，值为0x9000
 	mov	%ax, %es
 
-# Print some inane message
+# 打印一些信息，中断参考https://zh.wikipedia.org/wiki/INT_10H
 
-	mov	$0x03, %ah		# read cursor pos
-	xor	%bh, %bh
+	mov	$0x03, %ah			# 读取光标位置
+	xor	%bh, %bh			# BX包含页码参数
 	int	$0x10
-	
-	mov	$24, %cx
-	mov	$0x0007, %bx		# page 0, attribute 7 (normal)
-	#lea	msg1, %bp
-	mov     $msg1, %bp
-	mov	$0x1301, %ax		# write string, move cursor
+							# 返回值中DH为行高，DL为列
+	mov	$29, %cx			# CX保存字符串长度
+	mov	$0x0007, %bx		# BH为页码，第0页，BL为颜色，page 0, attribute 7 (normal)
+	mov $msg1, %bp			# ES:BP为字符串偏移
+	mov	$0x1301, %ax		# AH=0x13表示写字符串，AL=0x01表示写模式
 	int	$0x10
 
 # ok, we've written the message, now
 # we want to load the system (at 0x10000)
 
-	mov	$SYSSEG, %ax
-	mov	%ax, %es		# segment of 0x010000
-	call	read_it
-	call	kill_motor
+	mov	$SYSSEG, %ax		# SYSSEG为0x1000，也就是将system加载到内存0x10000开始的内存地址
+	mov	%ax, %es			# segment of 0x010000
+	call	read_it			# ES为输入，读取system到内存
+	call	kill_motor		# 关闭电机
 
-# After that we check which root-device to use. If the device is
-# defined (#= 0), nothing is done and the given device is used.
-# Otherwise, either /dev/PS0 (2,28) or /dev/at0 (2,8), depending
-# on the number of sectors that the BIOS reports currently.
-
-	#seg cs
-	mov	%cs:root_dev+0, %ax
-	cmp	$0, %ax
+/*
+	在Linux中软驱的主设备号是2，次设备号=type*4+nr，其中type为2表示1.2MB类型，7为1.44MB类型
+	nr为0至3对应软驱A、B、C、D，那么/dev/PS0(2,28)对应的28=7*4+0，即1.44MB类型的软驱A
+*/
+	#seg cs					# 使用CS段
+	mov	%cs:root_dev+0, %ax # 取root_dev处定义的根设备号
+	cmp	$0, %ax				# 如果ax为0，表示根设备号没有被定义
 	jne	root_defined
 	#seg cs
-	mov	%cs:sectors+0, %bx
+	mov	%cs:sectors+0, %bx	# 获取扇区数
 	mov	$0x0208, %ax		# /dev/ps0 - 1.2Mb
-	cmp	$15, %bx
+	cmp	$15, %bx			# 比较扇区数
 	je	root_defined
 	mov	$0x021c, %ax		# /dev/PS0 - 1.44Mb
 	cmp	$18, %bx
@@ -139,7 +138,7 @@ root_defined:
 # the setup-routine loaded directly after
 # the bootblock:
 
-	ljmp	$SETUPSEG, $0
+	ljmp	$SETUPSEG, $0	# 跳转到0x90200地址
 
 # This routine loads the system at address 0x10000, making sure
 # no 64kB boundaries are crossed. We try to load it as fast as
@@ -147,32 +146,31 @@ root_defined:
 #
 # in:	es - starting address segment (normally 0x1000)
 #
-sread:	.word 1+ SETUPLEN	# sectors read of current track
-head:	.word 0			# current head
-track:	.word 0			# current track
+sread:	.word 1+ SETUPLEN		# 当前已经读的扇区数，sectors read of current track
+head:	.word 0					# 当前的磁头号，current head
+track:	.word 0					# 当前的磁道，current track
 
 read_it:
 	mov	%es, %ax
-	test	$0x0fff, %ax
-die:	jne 	die			# es must be at 64kB boundary
-	xor 	%bx, %bx		# bx is starting address within segment
+	test	$0x0fff, %ax    	# 0x0fff & AX 进行与计算，因为里面存的是段地址,需要进4为所以相当于0xffff&AX
+die:	jne 	die				# es must be at 64kB boundary
+	xor 	%bx, %bx			# bx为当前段的起始地址，bx is starting address within segment
 rp_read:
 	mov 	%es, %ax
- 	cmp 	$ENDSEG, %ax		# have we loaded all yet?
-	jb	ok1_read
+ 	cmp 	$ENDSEG, %ax		# ENDSEG是系统镜像的大小加起始地址0x10000, have we loaded all yet?
+	jb	ok1_read				# ax != ENDSEG时跳转
 	ret
 ok1_read:
 	#seg cs
-	mov	%cs:sectors+0, %ax
-	sub	sread, %ax
-	mov	%ax, %cx
-	shl	$9, %cx
-	add	%bx, %cx
-	jnc 	ok2_read
-	je 	ok2_read
-	xor 	%ax, %ax
-	sub 	%bx, %ax
-	shr 	$9, %ax
+	mov	%cs:sectors+0, %ax		# 磁道上扇区数
+	sub	sread, %ax				# 扇区数-已读扇区数=剩下的扇区AX
+	mov	%ax, %cx				
+	shl	$9, %cx					# cx=cx*512
+	add	%bx, %cx				# cx=cx+bx，此次读操作后段内读入字节数
+	jnc 	ok2_read			# jnc表示当前的加法没有进位，即没有超过16位（64K）
+	xor 	%ax, %ax			# AX清0
+	sub 	%bx, %ax			# AX为0x0000 - bx得到，段内最多还能读取多少字节
+	shr 	$9, %ax				# 将字节转化为扇区，也就是段内还能存放多少扇区
 ok2_read:
 	call 	read_track
 	mov 	%ax, %cx
@@ -203,23 +201,23 @@ read_track:
 	push	%bx
 	push	%cx
 	push	%dx
-	mov	track, %dx
-	mov	sread, %cx
-	inc	%cx
-	mov	%dl, %ch
-	mov	head, %dx
-	mov	%dl, %dh
-	mov	$0, %dl
-	and	$0x0100, %dx
-	mov	$2, %ah
-	int	$0x13
-	jc	bad_rt
+	mov	track, %dx			# 当前磁道号
+	mov	sread, %cx			# 已经读取的扇区数
+	inc	%cx					# 增加扇区号
+	mov	%dl, %ch			# 当前磁道扇区号
+	mov	head, %dx			# 磁头号
+	mov	%dl, %dh			# 磁头号
+	mov	$0, %dl				# 驱动器号
+	and	$0x0100, %dx		# 磁头号不大于1
+	mov	$2, %ah				# 读取磁盘扇区
+	int	$0x13				# 读取的ES:BX
+	jc	bad_rt				# 出错则跳转到bad_rt
 	pop	%dx
 	pop	%cx
 	pop	%bx
 	pop	%ax
 	ret
-bad_rt:	mov	$0, %ax
+bad_rt:	mov	$0, %ax			# AX=0是重置磁盘
 	mov	$0, %dx
 	int	$0x13
 	pop	%dx
@@ -228,16 +226,12 @@ bad_rt:	mov	$0, %ax
 	pop	%ax
 	jmp	read_track
 
-#/*
-# * This procedure turns off the floppy drive motor, so
-# * that we enter the kernel in a known state, and
-# * don't have to worry about it later.
-# */
+#  关闭软驱电动机
 kill_motor:
 	push	%dx
-	mov	$0x3f2, %dx
+	mov	$0x3f2, %dx			# 软驱控制卡驱动端口
 	mov	$0, %al
-	outsb
+	outsb  					# 将ES:SI
 	pop	%dx
 	ret
 
@@ -246,12 +240,12 @@ sectors:
 
 msg1:
 	.byte 13,10
-	.ascii "Loading system ..."
+	.ascii "Loading SS's system ..."
 	.byte 13,10,13,10
 
 	.org 508
 root_dev:
-	.word ROOT_DEV
+	.word ROOT_DEV # 508字节和509字节定义根设备号
 boot_flag:
 	.word 0xAA55
 	

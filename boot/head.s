@@ -13,10 +13,10 @@
  */
 .text
 .globl idt,gdt,pg_dir,tmp_floppy_area
-pg_dir:
+pg_dir:  			# 页表会被放在这里
 .globl startup_32
 startup_32:
-	movl $0x10,%eax
+	movl $0x10,%eax # 这里的0x10是全局段描述符表的选择子
 	mov %ax,%ds
 	mov %ax,%es
 	mov %ax,%fs

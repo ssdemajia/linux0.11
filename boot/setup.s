@@ -15,8 +15,8 @@
 #
 
 # NOTE! These had better be the same as in bootsect.s!
-
-	.equ INITSEG, 0x9000	# we move boot here - out of the way
+# setup.s主要利用BIOS中断读取机器系统数据，并将数据保存在0x90000开始的地址
+	.equ INITSEG, 0x9000	# bootsect.s会把自己加载到这里
 	.equ SYSSEG, 0x1000	# system loaded at 0x10000 (65536).
 	.equ SETUPSEG, 0x9020	# this is the current segment
 
@@ -31,69 +31,85 @@
 
 	ljmp $SETUPSEG, $_start	
 _start:
+# 打印现在setup.s中
+	mov	$0x03, %ah			# 读取光标位置
+	xor	%bh, %bh			# BX包含页码参数
+	int	$0x10
+							# 返回值中DH为行高，DL为列
+	mov	$31, %cx			# CX保存字符串长度
+	mov	$0x0007, %bx		# BH为页码，第0页，BL为颜色，page 0, attribute 7 (normal)
+	mov $msgss, %bp			# ES:BP为字符串偏移
+	mov	$0x1301, %ax		# AH=0x13表示写字符串，AL=0x01表示写模式
+	int	$0x10
 
-# ok, the read went well so we get current cursor position and save it for
-# posterity.
-
+# 读取指针位置，参考：http://stanislavs.org/helppc/int_10-3.html
 	mov	$INITSEG, %ax	# this is done in bootsect already, but...
 	mov	%ax, %ds
-	mov	$0x03, %ah	# read cursor pos
+	mov	$0x03, %ah		# read cursor pos
 	xor	%bh, %bh
-	int	$0x10		# save it in known place, con_init fetches
-	mov	%dx, %ds:0	# it from 0x90000.
-# Get memory size (extended mem, kB)
+	int	$0x10			# save it in known place, con_init fetches
+	mov	%dx, %ds:0		# 保存行数、列数到0x90000.
 
+# Get memory size (extended mem, kB)
 	mov	$0x88, %ah 
 	int	$0x15
-	mov	%ax, %ds:2
-
-# Get video-card data:
-
-	mov	$0x0f, %ah
+	mov	%ax, %ds:2 		# 获取从1MB内存后扩展了AX个1KB内存
+# 将内存大小显示	
+	mov	$0x03, %ah			# 读取光标位置
+	xor	%bh, %bh			# BX包含页码参数
 	int	$0x10
-	mov	%bx, %ds:4	# bh = display page
-	mov	%ax, %ds:6	# al = video mode, ah = window width
+							# 返回值中DH为行高，DL为列
+	mov	$14, %cx			# CX保存字符串长度
+	mov	$0x0007, %bx		# BH为页码，第0页，BL为颜色，page 0, attribute 7 (normal)
+	mov $msgmem, %bp			# ES:BP为字符串偏移
+	mov	$0x1301, %ax		# AH=0x13表示写字符串，AL=0x01表示写模式
+	int	$0x10
+	
+# Get video-card data:
+	mov	$0x0f, %ah  	# 0x0f获取video-card state
+	int	$0x10
+	mov	%bx, %ds:4		# bh = display page
+	mov	%ax, %ds:6		# al = video mode, ah = window width
 
-# check for EGA/VGA and some config parameters
-
-	mov	$0x12, %ah
+# check for EGA/VGA and some config parameters，http://stanislavs.org/helppc/int_10-12.html
+	mov	$0x12, %ah		# Video子系统配置
 	mov	$0x10, %bl
 	int	$0x10
-	mov	%ax, %ds:8
+	mov	%ax, %ds:8		
 	mov	%bx, %ds:10
 	mov	%cx, %ds:12
 
-# Get hd0 data
+# 取第一个硬盘的参数表，Get hd0 data
 
 	mov	$0x0000, %ax
 	mov	%ax, %ds
-	lds	%ds:4*0x41, %si
+	lds	%ds:4*0x41, %si # 将ds:4*0x41的地址的值存入ds:si中，这个是中断向量0x41
 	mov	$INITSEG, %ax
 	mov	%ax, %es
-	mov	$0x0080, %di
+	mov	$0x0080, %di	# di是目的地址
 	mov	$0x10, %cx
 	rep
 	movsb
 
-# Get hd1 data
+# 取第二个硬盘的参数表，Get hd1 data
 
 	mov	$0x0000, %ax
 	mov	%ax, %ds
 	lds	%ds:4*0x46, %si
 	mov	$INITSEG, %ax
 	mov	%ax, %es
-	mov	$0x0090, %di
+	mov	$0x0090, %di	# 传输地址
 	mov	$0x10, %cx
 	rep
 	movsb
 
+# 检查是否存在第二块硬盘，也就是hd1，参考：http://stanislavs.org/helppc/int_13-15.html
 # Check that there IS a hd1 :-)
-
-	mov	$0x01500, %ax
-	mov	$0x81, %dl
+	mov	$0x01500, %ax	
+	mov	$0x81, %dl		# 0x81表示第二块磁盘
 	int	$0x13
 	jc	no_disk1
-	cmp	$3, %ah
+	cmp	$3, %ah			# 如果没有第二块
 	je	is_disk1
 no_disk1:
 	mov	$INITSEG, %ax
@@ -104,8 +120,8 @@ no_disk1:
 	rep
 	stosb
 is_disk1:
-
-# now we want to move to protected mode ...
+sbb:	jmp sbb
+# 接下来进入保护模式
 
 	cli			# no interrupts allowed ! 
 
@@ -131,12 +147,12 @@ do_move:
 end_move:
 	mov	$SETUPSEG, %ax	# right, forgot this at first. didn't work :-)
 	mov	%ax, %ds
-	lidt	idt_48		# load idt with 0,0
-	lgdt	gdt_48		# load gdt with whatever appropriate
+	lidt	idt_48		# 加载中断描述符表到idt，load idt with 0,0
+	lgdt	gdt_48		# 加载全局描述符表到寄存器gdt，load gdt with whatever appropriate
 
 # that was painless, now we enable A20
 
-	#call	empty_8042	# 8042 is the keyboard controller
+	call	empty_8042	# 8042 is the keyboard controller
 	#mov	$0xD1, %al	# command write
 	#out	%al, $0x64
 	#call	empty_8042
@@ -192,15 +208,15 @@ end_move:
 # things as simple as possible, we do no register set-up or anything,
 # we let the gnu-compiled 32-bit programs do that. We just jump to
 # absolute address 0x00000, in 32-bit protected mode.
-	#mov	$0x0001, %ax	# protected mode (PE) bit
-	#lmsw	%ax		# This is it!
+	mov	$0x0001, %ax	# protected mode (PE) bit
+	lmsw	%ax		# 加载机器状态字，This is it!
 	mov	%cr0, %eax	# get machine status(cr0|MSW)	
 	bts	$0, %eax	# turn on the PE-bit 
 	mov	%eax, %cr0	# protection enabled
 				
 				# segment-descriptor        (INDEX:TI:RPL)
 	.equ	sel_cs0, 0x0008 # select for code segment 0 (  001:0 :00) 
-	ljmp	$sel_cs0, $0	# jmp offset 0 of code segment 0 in gdt
+	; ljmp	$sel_cs0, $0	# jmp offset 0 of code segment 0 in gdt
 
 # This routine checks that the keyboard command queue is empty
 # No timeout is used - if this hangs there is something wrong with
@@ -233,7 +249,13 @@ gdt_48:
 	.word	0x800			# gdt limit=2048, 256 GDT entries
 	.word   512+gdt, 0x9		# gdt base = 0X9xxxx, 
 	# 512+gdt is the real gdt after setup is moved to 0x9020 * 0x10
-	
+msgss:
+	.byte 13,10
+	.ascii "Now we are in setup.s ..."
+	.byte 13,10,13,10
+msgmem:
+	.ascii "Memory size:"
+	.byte 13,10
 .text
 endtext:
 .data
